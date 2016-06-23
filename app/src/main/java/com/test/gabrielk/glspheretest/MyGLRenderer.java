@@ -6,7 +6,13 @@ import android.opengl.Matrix;
 import android.os.SystemClock;
 import android.util.Log;
 
+
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.Random;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -18,13 +24,16 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 
 
 
-
+    private int zoom;
     private int programHandle;
     private float[] mModelMatrix = new float[16];
     private final float[] mMVPMatrix = new float[16];
     private final float[] mProjectionMatrix = new float[16];
     private final float[] mViewMatrix = new float[16];
 
+
+    // floats per trapezoid = 7 floats per vertex * 3 vertices per triangle * 2 triangles per trapezoid
+    private final int floatsPerTrap = 42;
 
     /** How many bytes per float. */
     private final int mBytesPerFloat = 4;
@@ -54,17 +63,28 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     private int mColorHandle;
 
 
-    private ArrayList<SphereTrap> traps;
 
+
+    //private FloatBuffer vertexBuffer;
+
+    public MyGLRenderer(int zoom) {
+        this.zoom = zoom;
+    }
+
+
+    public void zoom(int z) {
+        zoom = z;
+        setUp();
+    }
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-        GLES20.glClearColor(0.5f, 0.5f, 0.5f, 0.5f);
+        GLES20.glClearColor(0.0f, 0.0f, 0.5f, 1.0f);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
         GLES20.glDepthFunc(GLES20.GL_LEQUAL);
         GLES20.glDepthMask(true);
 
-        Matrix.setLookAtM(mViewMatrix, 0, 0, 0, 3.5f, 0, 0, -5, 0, 1, 0);
+        Matrix.setLookAtM(mViewMatrix, 0, 0, 0, 2f, 0, 0, -5, 0, 1, 0);
 
         programHandle = getProgram();
         mMVPMatrixHandle = GLES20.glGetUniformLocation(programHandle, "u_MVPMatrix");
@@ -72,14 +92,67 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         mColorHandle = GLES20.glGetAttribLocation(programHandle, "a_Color");
         GLES20.glUseProgram(programHandle);
 
-        traps = new ArrayList<SphereTrap>();
-        int zoom = 4;
-        for (int i = 0; i < Math.pow(2, zoom); i++)
-            for (int j = 0; j < Math.pow(2, zoom); j++) {
-                traps.add(new SphereTrap(zoom, i, j));
-            }
-        //Log.e("DEBUG", "" + traps.size());
+        setUp();
     }
+
+    private void setUp() {
+        //Random r = new Random();
+
+        //Matrix.setLookAtM(mViewMatrix, 0, 0, 0, 2f, 0, 0, -5, 0, 1, 0);
+
+
+        float [] verticesData = new float [floatsPerTrap * (int) Math.pow(4, zoom)];
+
+        for (int i = 0; i < Math.pow(2, zoom); i++)
+            for (int j = 0; j < Math.pow(2, zoom); j++)
+                System.arraycopy(getVertexData(i, j), 0, verticesData, (int) (i * Math.pow(2, zoom) + j) * floatsPerTrap, floatsPerTrap);
+
+
+        FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(verticesData.length * mBytesPerFloat)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+
+        vertexBuffer.put(verticesData).position(0);
+
+
+        final int vertexBufferIdx;
+        final int buffers[] = new int[1];
+        GLES20.glGenBuffers(1, buffers, 0);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, buffers[0]);
+        GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, vertexBuffer.capacity() * mBytesPerFloat, vertexBuffer, GLES20.GL_STATIC_DRAW);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+
+        vertexBufferIdx = buffers[0];
+
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vertexBufferIdx);
+        GLES20.glEnableVertexAttribArray(mPositionHandle);
+        GLES20.glVertexAttribPointer(mPositionHandle, mPositionDataSize, GLES20.GL_FLOAT, false, mStrideBytes, 0);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vertexBufferIdx);
+        GLES20.glEnableVertexAttribArray(mColorHandle);
+        GLES20.glVertexAttribPointer(mColorHandle, mColorDataSize, GLES20.GL_FLOAT, false,
+                mStrideBytes, mPositionDataSize * mBytesPerFloat);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+
+
+//        vertexBuffer.position(mPositionOffset);
+//
+//
+//        GLES20.glVertexAttribPointer(mPositionHandle, mPositionDataSize, GLES20.GL_FLOAT, false,
+//                mStrideBytes, vertexBuffer);
+//
+//
+//        GLES20.glEnableVertexAttribArray(mPositionHandle);
+//
+//        vertexBuffer.position(mColorOffset);
+//
+//        GLES20.glVertexAttribPointer(mColorHandle, mColorDataSize, GLES20.GL_FLOAT, false,
+//                mStrideBytes, vertexBuffer);
+//
+//        GLES20.glEnableVertexAttribArray(mColorHandle);
+    }
+
 
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
@@ -108,25 +181,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         // Draw the triangle facing straight on.
         Matrix.setIdentityM(mModelMatrix, 0);
         Matrix.rotateM(mModelMatrix, 0, angleInDegrees, -0.5f, 1.0f, 0.25f);
-        for (int i = 0; i < traps.size(); i++) {
-            drawTriangle(traps.get(i).getTri1());
-            drawTriangle(traps.get(i).getTri2());
-        }
-    }
 
-    public void drawTriangle(Triangle triangle) {
-        triangle.getVertexBuffer().position(mPositionOffset);
-        GLES20.glVertexAttribPointer(mPositionHandle, mPositionDataSize, GLES20.GL_FLOAT, false,
-                mStrideBytes,  triangle.getVertexBuffer());
-
-        GLES20.glEnableVertexAttribArray(mPositionHandle);
-
-        // Pass in the color information
-        triangle.getVertexBuffer().position(mColorOffset);
-        GLES20.glVertexAttribPointer(mColorHandle, mColorDataSize, GLES20.GL_FLOAT, false,
-                mStrideBytes, triangle.getVertexBuffer());
-
-        GLES20.glEnableVertexAttribArray(mColorHandle);
 
         // This multiplies the view matrix by the model matrix, and stores the result in the MVP matrix
         // (which currently contains model * view).
@@ -135,9 +190,59 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         // This multiplies the modelview matrix by the projection matrix, and stores the result in the MVP matrix
         // (which now contains model * view * projection).
         Matrix.multiplyMM(mMVPMatrix, 0, mProjectionMatrix, 0, mMVPMatrix, 0);
-
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mMVPMatrix, 0);
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 3);
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0,  6 * (int) Math.pow(4, zoom));
+//        for (int i = 0; i < traps.size(); i++) {
+//            drawTriangle(traps.get(i).getTri1());
+//            drawTriangle(traps.get(i).getTri2());
+//        }
+    }
+
+
+
+    private float[] getVertexData(int row, int col) {
+        double inc = Math.PI * 2 / Math.pow(2, zoom);
+        double theta = row * inc - Math.PI;
+        //phi = col * inc - Math.PI;
+        double phi = col * inc / 2;
+
+
+        //float color = (float) ((theta + Math.PI) / (2 * Math.PI));
+        float color = (float) ((Math.abs(theta/Math.PI))/2 + (Math.abs((phi - Math.PI/2)/(Math.PI/2)))/2);
+
+        double[][] spherePoints = new double[][] {{theta, phi}, {theta + inc, phi}, {theta + inc, phi + inc / 2}, {theta, phi + inc / 2}};
+        double[][] vertexPoints = new double[4][3];
+        for (int i = 0; i < spherePoints.length; i ++)
+            vertexPoints[i] = sphereToXYZ(spherePoints[i]);
+
+        return new float[] {
+                //Tri1
+                (float) (vertexPoints[0][0]),(float) (vertexPoints[0][1]), (float) (vertexPoints[0][2]),
+                color, color, color, 1.0f,
+
+                (float) (vertexPoints[1][0]),(float) (vertexPoints[1][1]), (float) (vertexPoints[1][2]),
+                color, color, color, 1.0f,
+
+                (float) (vertexPoints[3][0]),(float) (vertexPoints[3][1]), (float) (vertexPoints[3][2]),
+                color, color, color, 1.0f,
+
+                //tri2
+                (float) (vertexPoints[3][0]),(float) (vertexPoints[3][1]), (float) (vertexPoints[3][2]),
+                color, color, color, 1.0f,
+
+                (float) (vertexPoints[1][0]),(float) (vertexPoints[1][1]), (float) (vertexPoints[1][2]),
+                color, color, color, 1.0f,
+
+                (float) (vertexPoints[2][0]),(float) (vertexPoints[2][1]), (float) (vertexPoints[2][2]),
+                color, color, color, 1.0f,};
+    }
+
+    private double[] sphereToXYZ(double[] p) {
+        if (p.length != 2)
+            Log.e("DEBUG", "you dun goofed");
+
+        return new double[] {Math.cos(p[0]) * Math.sin(p[1]), Math.sin(p[0]) * Math.sin(p[1]), Math.cos(p[1])};
 
     }
 
